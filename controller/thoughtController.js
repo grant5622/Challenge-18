@@ -1,105 +1,147 @@
-const {
-    thought,
-    user
+const { ThoughtModel, UserModel } = require( "../models" );
 
-} = require ("../models");
 const thoughtController = {
-    getAllThoughts(request,response){
-        thought.find({}).then(thoughtData=>response.json(thoughtData))
-        .catch(error=>{
-            console.log(error);
-            response.status(500).json(error);
-        });
+    getAllThoughts ( req, res )
+    {
+        Thought.find( {} )
+            .populate( {
+                path: "reactions",
+                select: "-__v",
+            } )
+            .select( "-__v" )
+            .sort( { _id: -1 } )
+            .then( ( thoughts ) => res.json( thoughts ) )
+            .catch( ( err ) =>
+            {
+                console.log( err );
+                res.sendStatus( 400 );
+            } );
     },
-    getThoughtByID({
-        parameters
-    },response){
-        thought.findOne({
-            _ID: parameters.id
-        }).select("-__v").sort({
-            _ID: -1
-        }).then(thoughtData=>{
-            if(!thoughtData){
-                response.status(404).json({
-                    message: "no thought with that ID"
-                });
-                return
-            }
-            response.json(thoughtData);
-        }).catch(error=>{
-            console.log(error);
-            response.status(400).json(error);
-        });
-    },
-    addThought({
-        body
-    },response){
-        thought.create(body).then((thoughtData)=>{
-            return user.findOneAndUpdate(
+
+    getThoughtById ( { params }, res )
+    {
+        ThoughtModel.findOne( { _id: params.id } )
+            .populate( {
+                path: "reactions",
+                select: "-__v",
+            } )
+            .select( "-__v" )
+            .then( ( thought ) =>
+            {
+                if ( !thought )
                 {
-                    _ID:body.userID
-                },
-                {
-                    $addToSet:{
-                        thoughts:thoughtData._ID
-                    }
-                },
-                {
-                    new: true
+                    return res.status( 404 ).json( { message: "No thought with this id!" } );
                 }
-            );
-        }).then(userData=>{
-            if(!userData){
-                response.status(404).json({
-                    message: "no user with that ID"
-                });
-                return
-            }
-            response.json(userData);
-        }).catch(error=>{
-            console.log(error);
-            response.status(400).json(error);
-        });
+                res.json( thought );
+            } )
+            .catch( ( err ) =>
+            {
+                console.log( err );
+                res.sendStatus( 400 );
+            } );
     },
-    updateThought({
-        parameters,
-        body
-    },response){
-        thought.findOneAndUpdate({
-            _ID:parameters.thoughtID
-        },
-        {
-            $set:body
-        },
-        {
+
+    createThought ( { params, body }, res )
+    {
+        ThoughtModel.create( body )
+            .then( ( { _id } ) =>
+            {
+                return UserModel.findOneAndUpdate(
+                    { _id: body.userId },
+                    { $push: { thoughts: _id } },
+                    { new: true }
+                );
+            } )
+            .then( ( user ) =>
+            {
+                if ( !user )
+                {
+                    return res
+                        .status( 404 )
+                        .json( { message: "Thought created but no user with this id!" } );
+                }
+
+                res.json( { message: "Thought successfully created!" } );
+            } )
+            .catch( ( err ) => res.json( err ) );
+    },
+
+    updateThought ( { params, body }, res )
+    {
+        ThoughtModel.findOneAndUpdate( { _id: params.id }, body, {
+            new: true,
             runValidators: true,
-            new: true
-        }).then(updateData=>{
-            if(!updaterData){
-                response.status(404).json({
-                    message: "no thought with that ID"
-                });
-                return
-            }
-            return response.json({
-                message: "Succesfully updated"
-            });
-        }).catch(error=>
-            response.json(error)
-            );
+        } )
+            .then( ( thought ) =>
+            {
+                if ( !thought )
+                {
+                    res.status( 404 ).json( { message: "No thought found with this id!" } );
+                    return;
+                }
+                res.json( thought );
+            } )
+            .catch( ( err ) => res.json( err ) );
     },
-    removeThought({
-        parameters
-    },response){
-        thought.findOneAndDelete({
-            _ID: parameters.thoughtID
-        }).then(deletedThought=>{
-            if(!deletedThought){
-                return response.status(404).json({
-                    message: "No thought by that ID"
-                });
-            }
-        })
-    }
-    
-}
+
+    deleteThought ( { params }, res )
+    {
+        ThoughtModel.findOneAndDelete( { _id: params.id } )
+            .then( ( thought ) =>
+            {
+                if ( !thought )
+                {
+                    return res.status( 404 ).json( { message: "No thought with this id!" } );
+                }
+
+                return UserModel.findOneAndUpdate(
+                    { thoughts: params.id },
+                    { $pull: { thoughts: params.id } },
+                    { new: true }
+                );
+            } )
+            .then( ( user ) =>
+            {
+                if ( !user )
+                {
+                    return res
+                        .status( 404 )
+                        .json( { message: "Thought created but no user with this id!" } );
+                }
+                res.json( { message: "Thought successfully deleted!" } );
+            } )
+            .catch( ( err ) => res.json( err ) );
+    },
+
+    addReaction ( { params, body }, res )
+    {
+        ThoughtModel.findOneAndUpdate(
+            { _id: params.thoughtId },
+            { $addToSet: { reactions: body } },
+            { new: true, runValidators: true }
+        )
+            .then( ( thought ) =>
+            {
+                if ( !thought )
+                {
+                    res.status( 404 ).json( { message: "No thought with this id" } );
+                    return;
+                }
+                res.json( thought );
+            } )
+            .catch( ( err ) => res.json( err ) );
+    },
+
+    removeReaction ( { params }, res )
+    {
+        ThoughtModel.findOneAndUpdate(
+            { _id: params.thoughtId },
+            { $pull: { reactions: { reactionId: params.reactionId } } },
+            { new: true }
+        )
+            .then( ( thought ) => res.json( thought ) )
+            .catch( ( err ) => res.json( err ) );
+    },
+};
+
+module.exports = thoughtController;
